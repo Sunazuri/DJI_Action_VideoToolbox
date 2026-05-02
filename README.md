@@ -367,4 +367,4 @@ DJI_Action_VideoToolbox/
 
 ## 👤 作者
 
-Sunazuri
+Syuzouin Yukyu (Sunazuri)
