@@ -30,13 +30,13 @@ internal static class Program
     {
         try
         {
-            var logPath = Path.Combine(AppContext.BaseDirectory, "DJI_Action_VideoToolbox_v1.0.6_crash.log");
+            var logPath = Path.Combine(AppContext.BaseDirectory, "DJI_Action_VideoToolbox_v1.0.8_crash.log");
             File.AppendAllText(logPath, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + Environment.NewLine + ex + Environment.NewLine + Environment.NewLine, new UTF8Encoding(false));
         }
         catch { }
         try
         {
-            MessageBox.Show("未処理例外を記録しました。" + Environment.NewLine + Environment.NewLine + ex.GetType().Name + ": " + ex.Message, "DJI_Action_VideoToolbox_v1.0.6", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("未処理例外を記録しました。" + Environment.NewLine + Environment.NewLine + ex.GetType().Name + ": " + ex.Message, "DJI_Action_VideoToolbox_v1.0.8", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         catch { }
     }
