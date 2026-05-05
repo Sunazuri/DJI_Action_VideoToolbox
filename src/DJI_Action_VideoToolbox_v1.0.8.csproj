@@ -8,13 +8,13 @@
     <Nullable>enable</Nullable>
 
     <!-- アプリ名 / バージョン -->
-    <AssemblyName>DJI_Action_VideoToolbox_v1.0.6</AssemblyName>
+    <AssemblyName>DJI_Action_VideoToolbox_v1.0.8</AssemblyName>
     <RootNamespace>DJI_Action_VideoToolbox</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <FileVersion>1.0.6.0</FileVersion>
-    <AssemblyVersion>1.0.6.0</AssemblyVersion>
-    <Version>1.0.6</Version>
+    <FileVersion>1.0.8.0</FileVersion>
+    <AssemblyVersion>1.0.8.0</AssemblyVersion>
+    <Version>1.0.8</Version>
 
     <!-- Release Any CPU + win-x64 自己完結 単一exe発行用 -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

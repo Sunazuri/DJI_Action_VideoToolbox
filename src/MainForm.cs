@@ -18,8 +18,8 @@ namespace DJI_Action_VideoToolbox;
 
 public sealed class MainForm : Form
 {
-    private const string AppVersion = "1.0.6";
-    private const string AppName = "DJI_Action_VideoToolbox_v1.0.6";
+    private const string AppVersion = "1.0.8";
+    private const string AppName = "DJI_Action_VideoToolbox_v1.0.8";
 
     private static readonly string[] EncodeVideoExtensions = { ".mp4", ".mov", ".mkv", ".m4v" };
     private static readonly string[] ConcatVideoExtensions = { ".mp4", ".mkv" };
@@ -63,6 +63,10 @@ public sealed class MainForm : Form
     private CheckBox chkEncOverwrite = null!;
     private CheckBox chkEncSoftIndoor = null!;
     private CheckBox chkEncRecursive = null!;
+    private CheckBox chkEncShutdownAfterComplete = null!;
+    private CheckBox chkEncShutdownOnError = null!;
+    private NumericUpDown numEncShutdownDelay = null!;
+    private ComboBox cmbEncShutdownDelayUnit = null!;
     private ComboBox cmbEncProcessMode = null!;
     private ComboBox cmbEncLutInterpolation = null!;
 
@@ -112,7 +116,7 @@ public sealed class MainForm : Form
         LogEncode($"設定ファイル: {_settingsService.SettingsPath}");
         LogEncode($"CPU論理プロセッサ数: {Environment.ProcessorCount} / 推奨初期並列数: {AppSettings.ComputeRecommendedParallelJobs()}");
         LogEncode("エンコード入力、LUT、出力先、FFmpeg/ffprobe欄はD&D対応です。");
-        LogEncode("v1.0.6: 1920x1080 / 125%表示でも使いやすいよう、画面作業領域に合わせた自動リサイズとスクロール保険を追加しました。");
+        LogEncode("v1.0.8: エンコード中でもシャットダウン関連設定を変更できるようにしました。完了直後の最新設定で判定します。");
         LogConcat("動画連結タブを初期化しました。mp4 / mkv のファイルまたはフォルダをD&Dできます。");
         UpdateGlobalStatus("待機中");
     }
@@ -125,7 +129,7 @@ public sealed class MainForm : Form
 
     private void BuildUi()
     {
-        // v1.0.6: 1920x1080 / 125% 表示でも下部ボタンが隠れにくいよう、
+        // v1.0.8: v1.0.7のシャットダウン機能を、エンコード中でも変更できるリアルタイム反映仕様へ改善。
         // 画面全体をスクロール可能なホストに入れ、作業領域に応じて自動リサイズします。
         var scrollHost = new Panel
         {
@@ -281,7 +285,7 @@ public sealed class MainForm : Form
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 98));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 194));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 224));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
@@ -365,9 +369,9 @@ public sealed class MainForm : Form
     private Control BuildEncoderOptionsGroup()
     {
         var group = new GroupBox { Text = "3. エンコード設定 / 自動走査 / LUT適用モード", Dock = DockStyle.Fill };
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 6, RowCount = 6, Padding = new Padding(8) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 6, RowCount = 7, Padding = new Padding(8) };
         for (int i = 0; i < 6; i++) layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16.666F));
-        for (int i = 0; i < 6; i++) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+        for (int i = 0; i < 7; i++) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
 
         chkEncApplyLut = CreateCheckBox("LUT適用 ON");
         chkEncHevcNvenc = CreateCheckBox("HEVC NVENC");
@@ -377,6 +381,10 @@ public sealed class MainForm : Form
         chkEncOverwrite = CreateCheckBox("既存出力を上書き");
         chkEncSoftIndoor = CreateCheckBox("室内向け微補正");
         chkEncRecursive = CreateCheckBox("フォルダ再帰追加");
+        chkEncShutdownAfterComplete = CreateCheckBox("処理完了後シャットダウン");
+        chkEncShutdownAfterComplete.CheckedChanged += (_, _) => UpdateEncodeShutdownUiRules();
+        chkEncShutdownOnError = CreateCheckBox("エラー終了時も強制シャットダウン");
+        chkEncShutdownOnError.CheckedChanged += (_, _) => UpdateSettingsFromUi();
 
         layout.Controls.Add(chkEncApplyLut, 0, 0);
         layout.Controls.Add(chkEncHevcNvenc, 1, 0);
@@ -392,6 +400,10 @@ public sealed class MainForm : Form
         numEncBFrames = CreateNumeric(0, 8, 4);
         numEncLookahead = CreateNumeric(0, 64, 32);
         numEncAq = CreateNumeric(0, 15, 10);
+        numEncShutdownDelay = CreateNumeric(1, 1440, 30);
+        cmbEncShutdownDelayUnit = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+        cmbEncShutdownDelayUnit.Items.Add("秒");
+        cmbEncShutdownDelayUnit.Items.Add("分");
         AddLabeledControl(layout, 2, 1, "並列数", numEncParallel);
         AddLabeledControl(layout, 3, 1, "CQ", numEncCq);
         AddLabeledControl(layout, 4, 1, "Bフレーム", numEncBFrames);
@@ -413,6 +425,13 @@ public sealed class MainForm : Form
         cmbEncLutInterpolation.Items.Add("tetrahedral 高品質");
         AddLabeledControl(layout, 0, 3, "LUT補間方式", cmbEncLutInterpolation, 3);
 
+        layout.Controls.Add(chkEncShutdownAfterComplete, 0, 4);
+        layout.SetColumnSpan(chkEncShutdownAfterComplete, 2);
+        AddLabeledControl(layout, 2, 4, "待機時間", numEncShutdownDelay);
+        AddLabeledControl(layout, 3, 4, "単位", cmbEncShutdownDelayUnit);
+        layout.Controls.Add(chkEncShutdownOnError, 4, 4);
+        layout.SetColumnSpan(chkEncShutdownOnError, 2);
+
         var hint = new Label
         {
             Dock = DockStyle.Fill,
@@ -420,17 +439,17 @@ public sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.DarkSlateGray,
         };
-        layout.Controls.Add(hint, 0, 4);
+        layout.Controls.Add(hint, 0, 5);
         layout.SetColumnSpan(hint, 6);
 
         var hint2 = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "自動走査: 選択中の動画（未選択時は先頭）をffprobeで解析し、CQ/Bフレーム/Lookahead/AQ強度を推奨値へ入力します。",
+            Text = "自動走査: 選択中の動画をffprobeで解析します。シャットダウン関連設定はエンコード中も変更でき、完了直後の最新状態で判定します。",
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.DimGray,
         };
-        layout.Controls.Add(hint2, 0, 5);
+        layout.Controls.Add(hint2, 0, 6);
         layout.SetColumnSpan(hint2, 6);
 
         group.Controls.Add(layout);
@@ -795,7 +814,12 @@ public sealed class MainForm : Form
         numEncAq.Value = Clamp(_settings.EncoderAqStrength, (int)numEncAq.Minimum, (int)numEncAq.Maximum);
         cmbEncProcessMode.SelectedIndex = Math.Clamp(_settings.EncoderProcessModeIndex, 0, Math.Max(0, cmbEncProcessMode.Items.Count - 1));
         cmbEncLutInterpolation.SelectedIndex = Math.Clamp(_settings.EncoderLutInterpolationIndex, 0, Math.Max(0, cmbEncLutInterpolation.Items.Count - 1));
+        chkEncShutdownAfterComplete.Checked = _settings.EncoderShutdownAfterComplete;
+        chkEncShutdownOnError.Checked = _settings.EncoderShutdownOnError;
+        numEncShutdownDelay.Value = Clamp(_settings.EncoderShutdownDelayValue, (int)numEncShutdownDelay.Minimum, (int)numEncShutdownDelay.Maximum);
+        cmbEncShutdownDelayUnit.SelectedIndex = Math.Clamp(_settings.EncoderShutdownDelayUnitIndex, 0, Math.Max(0, cmbEncShutdownDelayUnit.Items.Count - 1));
         ApplyEncoderProcessModeUiRules(updateSuffix: false);
+        UpdateEncodeShutdownUiRules();
 
         txtConcatOutputFolder.Text = _settings.ConcatOutputFolder;
         txtConcatOutputFileName.Text = string.IsNullOrWhiteSpace(_settings.ConcatOutputFileName) ? "joined_video.mkv" : _settings.ConcatOutputFileName;
@@ -829,6 +853,10 @@ public sealed class MainForm : Form
         _settings.EncoderAqStrength = (int)numEncAq.Value;
         _settings.EncoderProcessModeIndex = Math.Clamp(cmbEncProcessMode.SelectedIndex, 0, 4);
         _settings.EncoderLutInterpolationIndex = Math.Clamp(cmbEncLutInterpolation.SelectedIndex, 0, 2);
+        _settings.EncoderShutdownAfterComplete = chkEncShutdownAfterComplete.Checked;
+        _settings.EncoderShutdownOnError = chkEncShutdownOnError.Checked;
+        _settings.EncoderShutdownDelayValue = (int)numEncShutdownDelay.Value;
+        _settings.EncoderShutdownDelayUnitIndex = Math.Clamp(cmbEncShutdownDelayUnit.SelectedIndex, 0, 1);
 
         _settings.ConcatOutputFolder = txtConcatOutputFolder.Text.Trim().Trim('"');
         _settings.ConcatOutputFileName = txtConcatOutputFileName.Text.Trim();
@@ -922,6 +950,23 @@ public sealed class MainForm : Form
             {
                 txtEncSuffix.Text = GetDefaultEncoderSuffixForMode();
             }
+        }
+    }
+
+    private void UpdateEncodeShutdownUiRules()
+    {
+        if (chkEncShutdownAfterComplete == null || numEncShutdownDelay == null || cmbEncShutdownDelayUnit == null || chkEncShutdownOnError == null) return;
+
+        // v1.0.8: シャットダウン関連UIは、エンコード中でもリアルタイム変更を許可します。
+        // OFF時だけ待機時間とエラー時強制シャットダウンを無効化します。
+        var enabled = chkEncShutdownAfterComplete.Checked;
+        numEncShutdownDelay.Enabled = enabled;
+        cmbEncShutdownDelayUnit.Enabled = enabled;
+        chkEncShutdownOnError.Enabled = enabled;
+
+        if (!enabled && chkEncShutdownOnError.Checked)
+        {
+            chkEncShutdownOnError.Checked = false;
         }
     }
 
@@ -1270,7 +1315,30 @@ public sealed class MainForm : Form
             }).ToList();
 
             await Task.WhenAll(tasks).ConfigureAwait(false);
-            LogEncode(token.IsCancellationRequested ? "エンコードはキャンセルされました。" : "エンコード完了。");
+
+            var executedJobs = jobs.Select(x => x.Job).ToList();
+            var failedJobs = executedJobs.Where(j => string.Equals(j.Status, "失敗", StringComparison.Ordinal)).ToList();
+            var canceledJobs = executedJobs.Where(j => string.Equals(j.Status, "取消", StringComparison.Ordinal)).ToList();
+            var hadFailures = failedJobs.Count > 0;
+            var wasCanceled = token.IsCancellationRequested || canceledJobs.Count > 0;
+
+            if (wasCanceled)
+            {
+                LogEncode("エンコードはキャンセルされました。自動シャットダウンは実行しません。");
+            }
+            else if (hadFailures)
+            {
+                LogEncode($"エンコード完了。ただし失敗 {failedJobs.Count} 件があります。");
+            }
+            else
+            {
+                LogEncode("エンコード正常完了。");
+            }
+
+            if (!wasCanceled)
+            {
+                await HandlePostEncodeShutdownAsync(executedJobs, hadFailures, token).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1289,6 +1357,228 @@ public sealed class MainForm : Form
             });
             if (ReferenceEquals(_encodeCts, cts)) _encodeCts = null;
             cts?.Dispose();
+        }
+    }
+
+    private async Task HandlePostEncodeShutdownAsync(IReadOnlyList<EncodeJob> jobs, bool hadFailures, CancellationToken token)
+    {
+        // v1.0.8: エンコード開始時ではなく、完了直後の最新UI設定を採用します。
+        // これにより、エンコード中にON/OFFや待機時間を変更した場合も反映されます。
+        var options = GetPostEncodeShutdownOptionsSnapshot();
+        PersistPostEncodeShutdownOptions(options);
+
+        LogEncode($"完了直後の最新シャットダウン設定: {(options.Enabled ? "ON" : "OFF")} / エラー時強制: {(options.ShutdownOnError ? "ON" : "OFF")} / 待機: {options.DelayValue} {options.UnitName}");
+
+        if (!options.Enabled)
+        {
+            LogEncode("完了直後の設定がOFFのため、自動シャットダウンは実行しません。");
+            return;
+        }
+
+        if (hadFailures && !options.ShutdownOnError)
+        {
+            LogEncode("エラー終了が含まれ、完了直後の「エラー終了時も強制シャットダウン」がOFFのため、自動シャットダウンは実行しません。");
+            return;
+        }
+
+        var failedJobs = jobs.Where(j => string.Equals(j.Status, "失敗", StringComparison.Ordinal)).ToList();
+        var delaySeconds = options.DelaySeconds;
+        var scheduledAt = DateTime.Now.AddSeconds(delaySeconds);
+        var reason = hadFailures ? "エラー終了時も強制シャットダウン" : "処理完了後シャットダウン";
+
+        LogEncode($"{reason}: {delaySeconds} 秒後（{scheduledAt:yyyy-MM-dd HH:mm:ss}）に Windows をシャットダウンします。");
+        if (hadFailures)
+        {
+            LogEncode($"エラー終了時も強制シャットダウン ON: 失敗 {failedJobs.Count} 件。詳細ログ保存後にシャットダウンします。");
+            foreach (var job in failedJobs.Take(20)) LogEncode("失敗対象: " + job.InputPath);
+            if (failedJobs.Count > 20) LogEncode($"失敗対象は他に {failedJobs.Count - 20} 件あります。");
+        }
+
+        var firstLog = TrySaveEncodeLogForShutdown(jobs, hadFailures, "shutdown_scheduled");
+        if (!string.IsNullOrWhiteSpace(firstLog)) LogEncode("シャットダウン前ログ保存: " + firstLog);
+        SafeUi(() => lblEncStatus.Text = $"シャットダウン待機中: {delaySeconds}秒");
+
+        try
+        {
+            for (var remaining = delaySeconds; remaining > 0; remaining--)
+            {
+                token.ThrowIfCancellationRequested();
+                if (remaining <= 10 || remaining % 60 == 0 || remaining % 30 == 0)
+                {
+                    LogEncode($"シャットダウンまで残り {remaining} 秒。中止する場合は「キャンセル」を押してください。");
+                }
+                SafeUi(() => lblEncStatus.Text = $"シャットダウン待機中: 残り {remaining}秒");
+                await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
+            }
+
+            var finalLog = TrySaveEncodeLogForShutdown(jobs, hadFailures, "shutdown_execute");
+            if (!string.IsNullOrWhiteSpace(finalLog)) LogEncode("シャットダウン直前ログ保存: " + finalLog);
+            LogEncode("Windows シャットダウンを実行します: shutdown.exe /s /t 0");
+            ExecuteWindowsShutdown();
+        }
+        catch (OperationCanceledException)
+        {
+            LogEncode("シャットダウン待機はキャンセルされました。Windows のシャットダウンは実行しません。");
+            SafeUi(() => lblEncStatus.Text = "シャットダウン待機キャンセル");
+        }
+    }
+
+
+    private sealed class PostEncodeShutdownOptions
+    {
+        public bool Enabled { get; init; }
+        public bool ShutdownOnError { get; init; }
+        public int DelayValue { get; init; }
+        public int UnitIndex { get; init; }
+        public int DelaySeconds { get; init; }
+        public string UnitName => UnitIndex == 1 ? "分" : "秒";
+    }
+
+    private PostEncodeShutdownOptions GetPostEncodeShutdownOptionsSnapshot()
+    {
+        if (IsDisposed) return GetPostEncodeShutdownOptionsFromSettings();
+
+        if (InvokeRequired)
+        {
+            try
+            {
+                return (PostEncodeShutdownOptions)Invoke(new Func<PostEncodeShutdownOptions>(GetPostEncodeShutdownOptionsSnapshot));
+            }
+            catch
+            {
+                return GetPostEncodeShutdownOptionsFromSettings();
+            }
+        }
+
+        var enabled = chkEncShutdownAfterComplete?.Checked == true;
+        var shutdownOnError = enabled && chkEncShutdownOnError?.Checked == true;
+        var delayValue = numEncShutdownDelay == null ? _settings.EncoderShutdownDelayValue : (int)numEncShutdownDelay.Value;
+        var unitIndex = cmbEncShutdownDelayUnit == null ? _settings.EncoderShutdownDelayUnitIndex : Math.Clamp(cmbEncShutdownDelayUnit.SelectedIndex, 0, 1);
+        return CreatePostEncodeShutdownOptions(enabled, shutdownOnError, delayValue, unitIndex);
+    }
+
+    private PostEncodeShutdownOptions GetPostEncodeShutdownOptionsFromSettings()
+    {
+        return CreatePostEncodeShutdownOptions(
+            _settings.EncoderShutdownAfterComplete,
+            _settings.EncoderShutdownAfterComplete && _settings.EncoderShutdownOnError,
+            _settings.EncoderShutdownDelayValue,
+            _settings.EncoderShutdownDelayUnitIndex);
+    }
+
+    private static PostEncodeShutdownOptions CreatePostEncodeShutdownOptions(bool enabled, bool shutdownOnError, int delayValue, int unitIndex)
+    {
+        var safeValue = Math.Clamp(delayValue, 1, 1440);
+        var safeUnit = Math.Clamp(unitIndex, 0, 1);
+        var seconds = safeUnit == 1 ? checked(safeValue * 60) : safeValue;
+        return new PostEncodeShutdownOptions
+        {
+            Enabled = enabled,
+            ShutdownOnError = enabled && shutdownOnError,
+            DelayValue = safeValue,
+            UnitIndex = safeUnit,
+            DelaySeconds = seconds,
+        };
+    }
+
+    private void PersistPostEncodeShutdownOptions(PostEncodeShutdownOptions options)
+    {
+        try
+        {
+            _settings.EncoderShutdownAfterComplete = options.Enabled;
+            _settings.EncoderShutdownOnError = options.ShutdownOnError;
+            _settings.EncoderShutdownDelayValue = options.DelayValue;
+            _settings.EncoderShutdownDelayUnitIndex = options.UnitIndex;
+            _settingsService.Save(_settings);
+        }
+        catch (Exception ex)
+        {
+            LogEncode("完了直後のシャットダウン設定保存に失敗しました。ただし今回の判定には最新UI設定を使用します: " + ex.Message);
+        }
+    }
+
+    private int GetPostEncodeShutdownDelaySeconds()
+    {
+        var value = Math.Clamp(_settings.EncoderShutdownDelayValue, 1, 1440);
+        var unit = Math.Clamp(_settings.EncoderShutdownDelayUnitIndex, 0, 1);
+        return unit == 1 ? checked(value * 60) : value;
+    }
+
+    private string? TrySaveEncodeLogForShutdown(IReadOnlyList<EncodeJob> jobs, bool hadFailures, string stage)
+    {
+        try
+        {
+            return SaveEncodeLogForShutdown(jobs, hadFailures, stage);
+        }
+        catch (Exception ex)
+        {
+            LogEncode("シャットダウン前の詳細ログ保存に失敗しました: " + ex);
+            return null;
+        }
+    }
+
+    private string SaveEncodeLogForShutdown(IReadOnlyList<EncodeJob> jobs, bool hadFailures, string stage)
+    {
+        var dir = Path.Combine(AppContext.BaseDirectory, AppName + "_logs");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, $"encode_{stage}_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+
+        var sb = new StringBuilder();
+        sb.AppendLine(AppName);
+        sb.AppendLine("生成日時: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        sb.AppendLine("段階: " + stage);
+        sb.AppendLine("エラーを含む: " + (hadFailures ? "はい" : "いいえ"));
+        sb.AppendLine("処理件数: " + jobs.Count);
+        sb.AppendLine();
+        sb.AppendLine("[ジョブ一覧]");
+        foreach (var job in jobs)
+        {
+            sb.AppendLine($"- [{job.Status}] {job.InputPath}");
+            if (!string.IsNullOrWhiteSpace(job.OutputPath)) sb.AppendLine($"  出力: {job.OutputPath}");
+        }
+        sb.AppendLine();
+        sb.AppendLine("[画面ログ]");
+        sb.AppendLine(GetEncodeLogTextSnapshot());
+        File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
+        return path;
+    }
+
+    private string GetEncodeLogTextSnapshot()
+    {
+        try
+        {
+            if (logEnc == null || logEnc.IsDisposed) return string.Empty;
+            if (logEnc.InvokeRequired)
+            {
+                return (string)(logEnc.Invoke(new Func<string>(() => logEnc.Text)) ?? string.Empty);
+            }
+            return logEnc.Text;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private void ExecuteWindowsShutdown()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "shutdown.exe",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("/s");
+            psi.ArgumentList.Add("/t");
+            psi.ArgumentList.Add("0");
+            using var process = Process.Start(psi);
+            if (process == null) LogEncode("shutdown.exe の起動に失敗しました。Process.Start が null を返しました。");
+        }
+        catch (Exception ex)
+        {
+            LogEncode("shutdown.exe の実行に失敗しました: " + ex);
         }
     }
 
@@ -1539,7 +1829,7 @@ public sealed class MainForm : Form
     private void CancelEncoding()
     {
         _encodeCts?.Cancel();
-        LogEncode("キャンセル要求を送信しました。実行中の ffmpeg を停止します。");
+        LogEncode("キャンセル要求を送信しました。実行中の ffmpeg またはシャットダウン待機を停止します。");
     }
 
     private void SetEncoderRunning(bool running)
@@ -1548,6 +1838,11 @@ public sealed class MainForm : Form
         btnEncCancel.Enabled = running;
         btnEncAutoScan.Enabled = !running;
         btnCommonSave.Enabled = !running && !_concatRunning;
+
+        // v1.0.8: シャットダウン関連UIだけは、エンコード中でも操作可能にします。
+        // 完了直後に最新のUI状態を読み取るため、開始時固定にはしません。
+        if (chkEncShutdownAfterComplete != null) chkEncShutdownAfterComplete.Enabled = true;
+        UpdateEncodeShutdownUiRules();
     }
 
     private void ShowFirstEncodeCommand()
@@ -2085,6 +2380,10 @@ public sealed class AppSettings
     public int EncoderAqStrength { get; set; } = 10;
     public int EncoderProcessModeIndex { get; set; } = 0;
     public int EncoderLutInterpolationIndex { get; set; } = 0;
+    public bool EncoderShutdownAfterComplete { get; set; } = false;
+    public bool EncoderShutdownOnError { get; set; } = false;
+    public int EncoderShutdownDelayValue { get; set; } = 30;
+    public int EncoderShutdownDelayUnitIndex { get; set; } = 0;
 
     public string ConcatOutputFolder { get; set; } = "";
     public string ConcatOutputFileName { get; set; } = "joined_video.mkv";
@@ -2112,7 +2411,7 @@ public sealed class SettingsService
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    public string SettingsPath { get; } = Path.Combine(AppContext.BaseDirectory, "DJI_Action_VideoToolbox_v1.0.6_settings.json");
+    public string SettingsPath { get; } = Path.Combine(AppContext.BaseDirectory, "DJI_Action_VideoToolbox_v1.0.8_settings.json");
 
     public AppSettings Load()
     {
